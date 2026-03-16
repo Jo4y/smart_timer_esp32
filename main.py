@@ -6,14 +6,18 @@ from umqtt.simple import MQTTClient
 import ntptime # 內建的網路對時模組
 
 # --- 1. 硬體與全域變數設定 ---
-MY_ZONE_ID = "-OnUj2PeTETiwglVVhB1" # 記得換成你的
-MY_DEVICE_ID = "2"
+MY_UID = "4x5rweovlhaGIdxf4NEG3bqnfjf1"
+MY_ZONE_ID = "-OnUj2PeTETiwglVVhB1"
 
-relay = Pin(5, Pin.OUT)
-relay.value(0) # 預設關閉
+my_devices = {
+    "2":        {"pin": Pin(5, Pin.OUT),  "state": False, "schedule": None},
+    "0312_test1": {"pin": Pin(4, Pin.OUT),  "state": False, "schedule": None},
+    #"fan_01":   {"pin": Pin(14, Pin.OUT), "state": False, "schedule": None}
+}
 
-current_schedule = None # 儲存目前的排程 JSON
-current_state = False   # 儲存目前的繼電器狀態 (避免重複發送 MQTT)
+# 預設把所有設備都關閉
+for dev_id, dev_data in my_devices.items():
+    dev_data["pin"].value(0)
 
 # --- 2. 網路與對時 ---
 xtools.connect_wifi_led() # 沿用你工具包的連線方式
@@ -36,20 +40,22 @@ client = MQTTClient(
 )
 
 def sub_cb(topic, msg):
-    global current_schedule
     try:
-        payload = ujson.loads(msg.decode())
+        topic_str = topic.decode('utf-8') # 先把頻道名稱解碼成字串
+        payload = ujson.loads(msg.decode('utf-8'))
+        dev_id = payload.get("device_id")
         
-        # 檢查是不是給我的指令
-        if payload.get("device_id") == MY_DEVICE_ID:
-            print("收到排程訊息:", payload)
+        # 檢查這個設備 ID 是不是歸這塊 ESP32 管的
+        if dev_id in my_devices:
+            print(f"\n📥 [收到頻道] {topic_str}")
+            print(f"✨ 收到專屬設備 [{dev_id}] 的排程指令！")
             
             if payload.get("action") == "cancel":
-                current_schedule = None
-                print(">>> 排程已清空")
+                my_devices[dev_id]["schedule"] = None
+                print(f">>> [{dev_id}] 排程已清空")
             else:
-                current_schedule = payload
-                print(">>> 排程已更新")
+                my_devices[dev_id]["schedule"] = payload
+                print(f">>> [{dev_id}] 排程已更新")
                 
     except Exception as e:
         print("JSON 解析失敗:", e)
@@ -57,25 +63,24 @@ def sub_cb(topic, msg):
 client.set_callback(sub_cb)
 client.connect()
 
-topic = "smart_timer/schedule"
-print("訂閱頻道:", topic)
-client.subscribe(topic)
+topic_sub = f"users/{MY_UID}/zones/{MY_ZONE_ID}/devices/+/schedule"
+client.subscribe(topic_sub.encode('utf-8'))
+print(f"👂 開始監聽區域專屬頻道: {topic_sub}")
 
 # --- 4. 輔助函式：發送狀態 ---
-def update_status(is_active):
-    global current_state
-    current_state = is_active
-    relay.value(1 if is_active else 0) # 驅動繼電器
+def update_status(dev_id, is_active):
+    my_devices[dev_id]["state"] = is_active
+    my_devices[dev_id]["pin"].value(1 if is_active else 0)
     
     status_payload = {
         "zone_id": MY_ZONE_ID,
-        "device_id": MY_DEVICE_ID,
+        "device_id": dev_id,
         "is_active": is_active
     }
     
     try:
         client.publish("smart_timer/status", ujson.dumps(status_payload))
-        print(f"發送狀態更新 -> is_active: {is_active}")
+        print(f"📤 [狀態回報] 設備 {dev_id} -> {'開啟' if is_active else '關閉'}")
     except Exception as e:
         print("狀態發送失敗:", e)
 
@@ -89,47 +94,51 @@ while True:
     # now 的格式: (年, 月, 日, 時, 分, 秒, 星期幾, 一年的第幾天)
     # 注意: 星期幾是 0-6 (0=星期一, 6=星期日)
     now = utime.localtime(utime.time() + UTC_OFFSET)
+    now_mins = now[3] * 60 + now[4]
     
-    if current_schedule is not None:
-        mode = current_schedule.get("mode")
-        start_str = current_schedule.get("start", "")
-        end_str = current_schedule.get("end", "")
+    for dev_id, dev_data in my_devices.items():
+        schedule = dev_data["schedule"]
         
-        if start_str and end_str:
-            # 解析時間字串 (例如 "18:30" 轉成分鐘數方便比對)
-            sh, sm = map(int, start_str.split(':'))
-            eh, em = map(int, end_str.split(':'))
-            
-            now_mins = now[3] * 60 + now[4]
-            start_mins = sh * 60 + sm
-            end_mins = eh * 60 + em
-            
-            # 1. 判斷時間是否吻合
-            is_time_match = (start_mins <= now_mins < end_mins)
-            
-            # 2. 判斷日期是否吻合
-            is_day_match = False
-            
-            if mode == "once":
-                date_str = current_schedule.get("date", "")
-                if date_str:
-                    y, m, d = map(int, date_str.split('-'))
-                    if now[0] == y and now[1] == m and now[2] == d:
+        if schedule is not None:
+            mode = schedule.get("mode")
+            start_str = schedule.get("start", "")
+            end_str = schedule.get("end", "")
+        
+            if start_str and end_str:
+                # 解析時間字串 (例如 "18:30" 轉成分鐘數方便比對)
+                sh, sm = map(int, start_str.split(':'))
+                eh, em = map(int, end_str.split(':'))
+                
+                now_mins = now[3] * 60 + now[4]
+                start_mins = sh * 60 + sm
+                end_mins = eh * 60 + em
+                
+                # 1. 判斷時間是否吻合
+                is_time_match = (start_mins <= now_mins < end_mins)
+                
+                # 2. 判斷日期是否吻合
+                is_day_match = False
+                
+                if mode == "once":
+                    date_str = schedule.get("date", "")
+                    if date_str:
+                        y, m, d = map(int, date_str.split('-'))
+                        if now[0] == y and now[1] == m and now[2] == d:
+                            is_day_match = True
+                            
+                elif mode == "repeat":
+                    days = schedule.get("days", [])
+                    weekday = now[6] # MicroPython 的 weekday 剛好跟我們 App 的 List 順序一致！
+                    if len(days) == 7 and days[weekday] == True:
                         is_day_match = True
-                        
-            elif mode == "repeat":
-                days = current_schedule.get("days", [])
-                weekday = now[6] # MicroPython 的 weekday 剛好跟我們 App 的 List 順序一致！
-                if len(days) == 7 and days[weekday] == True:
-                    is_day_match = True
-            
-            # 3. 綜合判斷：現在到底該不該通電？
-            should_be_active = (is_time_match and is_day_match)
-            
-            # 4. 狀態改變才做事 (避免每秒瘋狂發送 MQTT)
-            if should_be_active and not current_state:
-                update_status(True)
-            elif not should_be_active and current_state:
-                update_status(False)
+                
+                # 3. 綜合判斷：現在到底該不該通電？
+                should_be_active = (is_time_match and is_day_match)
+                
+                # 4. 狀態改變才做事 (避免每秒瘋狂發送 MQTT)
+                if should_be_active and not dev_data["state"]:
+                    update_status(dev_id, True)
+                elif not should_be_active and dev_data["state"]:
+                    update_status(dev_id, False)
 
     utime.sleep(1)
