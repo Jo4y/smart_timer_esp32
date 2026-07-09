@@ -12,7 +12,6 @@ MY_ZONE_ID = "-OnUj2PeTETiwglVVhB1"
 my_devices = {
     "2":        {"pin": Pin(5, Pin.OUT),  "state": False, "schedule": None},
     "0312_test1": {"pin": Pin(4, Pin.OUT),  "state": False, "schedule": None},
-    #"fan_01":   {"pin": Pin(14, Pin.OUT), "state": False, "schedule": None}
 }
 
 # 預設把所有設備都關閉
@@ -20,7 +19,8 @@ for dev_id, dev_data in my_devices.items():
     dev_data["pin"].value(0)
 
 # --- 2. 網路與對時 ---
-xtools.connect_wifi_led() # 沿用你工具包的連線方式
+print("開始網路初始化...")
+xtools.auto_connect()
 
 try:
     print("同步網路時間 (NTP)...")

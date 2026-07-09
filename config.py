@@ -1,3 +1,4 @@
-# config.py     
-SSID = "TP-Link_42E4"        # WiFi名稱
-PASSWORD = "20250620"    # WiFi密碼
+# config.py
+#for test
+SSID = "HOTTEST🦊"        # WiFi名稱
+PASSWORD = "48694869"    # WiFi密碼
