@@ -4,13 +4,17 @@ from machine import Pin
 import config
 from umqtt.simple import MQTTClient
 import ntptime # 內建的網路對時模組
+import ds_sensor, time
+
+if ds_sensor.init_sensor(2):
+    print("溫度感測器OK！")
 
 # --- 1. 硬體與全域變數設定 ---
 MY_UID = "4x5rweovlhaGIdxf4NEG3bqnfjf1"
 MY_ZONE_ID = "-OnUj2PeTETiwglVVhB1"
 
 my_devices = {
-    "2":        {"pin": Pin(5, Pin.OUT),  "state": False, "schedule": None},
+    "2":        {"pin": Pin(3, Pin.OUT),  "state": False, "schedule": None},
     "0312_test1": {"pin": Pin(4, Pin.OUT),  "state": False, "schedule": None},
 }
 
@@ -83,6 +87,9 @@ def update_status(dev_id, is_active):
         print(f"📤 [狀態回報] 設備 {dev_id} -> {'開啟' if is_active else '關閉'}")
     except Exception as e:
         print("狀態發送失敗:", e)
+        
+TEMP_REPORT_INTERVAL = 5000 # 60000 毫秒 = 60 秒回報一次 (測試時可以改成 10000 比較快看到)
+last_temp_report = utime.ticks_ms()
 
 # --- 5. 主迴圈 ---
 print("--- 系統開始運行 ---")
@@ -95,6 +102,30 @@ while True:
     # 注意: 星期幾是 0-6 (0=星期一, 6=星期日)
     now = utime.localtime(utime.time() + UTC_OFFSET)
     now_mins = now[3] * 60 + now[4]
+    
+    #溫度回報
+    current_time = utime.ticks_ms()
+    if utime.ticks_diff(current_time, last_temp_report) >= TEMP_REPORT_INTERVAL:
+        temp = ds_sensor.get_temp()
+        if temp is not None:
+            print(f"🌡️現在溫度是 {temp:.1f} °C，準備上傳！")
+            
+            # 打包溫度資料
+            temp_payload = {
+                "zone_id": MY_ZONE_ID,
+                "current_temp": round(temp, 1)
+            }
+            
+            try:
+                # 透過 MQTT 發送到專屬的溫度頻道
+                temp_topic = f"smart_timer/zones/{MY_ZONE_ID}/temperature"
+                client.publish(temp_topic, ujson.dumps(temp_payload))
+                print(f"📤 [溫度回報] 成功發送至 MQTT頻道: {temp_topic}")
+            except Exception as e:
+                print("溫度發送失敗:", e)
+                
+        # 重置計時器，等待下一次回報
+        last_temp_report = current_time
     
     for dev_id, dev_data in my_devices.items():
         schedule = dev_data["schedule"]
