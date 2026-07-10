@@ -110,6 +110,43 @@ while True:
         if temp is not None:
             print(f"🌡️現在溫度是 {temp:.1f} °C，準備上傳！")
             
+            # 0710新增：過熱緊急斷電防線
+            SAFE_TEMP_LIMIT = 65.0  # 假設安全上限為 65 度 (可調整)
+            
+            if temp >= SAFE_TEMP_LIMIT:
+                print(f"🚨🚨🚨 警告！溫度飆達 {temp:.1f}°C，啟動緊急斷電！ 🚨🚨🚨")
+                
+                # 1. 強制關閉所有歸這塊板子管的繼電器
+                for dev_id, dev_data in my_devices.items():
+                    if dev_data["state"]: # 如果插座現在是開著的
+                        update_status(dev_id, False) # 呼叫你原本寫好的函式，斷電並回報狀態
+                        # 同時清空該設備的排程，防止它下一秒又因為排程時間到了被自動打開
+                        my_devices[dev_id]["schedule"] = None 
+                firebase_url = f"https://smart-timer-app-7da95-default-rtdb.firebaseio.com/users/{MY_UID}/notifications.json"
+                
+                # 取得目前時間並組裝格式
+                y, m, d, h, minute, s, _, _ = utime.localtime(utime.time() + UTC_OFFSET)
+                time_str = f"{y}-{m:02d}-{d:02d}T{h:02d}:{minute:02d}:{s:02d}"
+                
+                # 2. 發送專屬的「警報訊息」給 App (走 MQTT 廣播)
+                alert_payload = {
+                    "title": "危險！溫度過高",
+                    "content": "系統已強制切斷電源以保護設備安全。",
+                    "type": "danger",
+                    "status": "unread",
+                    "temperature": round(temp, 1),
+                    "zone_name": "我的智慧空間", # 你可以自訂這個名稱
+                    "timestamp": time_str
+                }
+                
+                try:
+                    res = urequests.post(firebase_url, json=alert_payload)
+                    print("📤 [過熱警報] 已成功寫入 Firebase 通知中心！")
+                    res.close()
+                except Exception as e:
+                    print("警報寫入 Firebase 失敗:", e)
+                    #^^^0710
+                    
             # 打包溫度資料
             temp_payload = {
                 "zone_id": MY_ZONE_ID,
@@ -117,12 +154,10 @@ while True:
             }
             
             try:
-                # 透過 MQTT 發送到專屬的溫度頻道
                 temp_topic = f"smart_timer/zones/{MY_ZONE_ID}/temperature"
                 client.publish(temp_topic, ujson.dumps(temp_payload))
-                print(f"📤 [溫度回報] 成功發送至 MQTT頻道: {temp_topic}")
             except Exception as e:
-                print("溫度發送失敗:", e)
+                pass
                 
         # 重置計時器，等待下一次回報
         last_temp_report = current_time
