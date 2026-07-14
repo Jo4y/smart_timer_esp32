@@ -88,7 +88,7 @@ def update_status(dev_id, is_active):
     except Exception as e:
         print("狀態發送失敗:", e)
         
-TEMP_REPORT_INTERVAL = 5000 # 60000 毫秒 = 60 秒回報一次 (測試時可以改成 10000 比較快看到)
+TEMP_REPORT_INTERVAL = 20000 # 60000 毫秒 = 60 秒回報一次 (測試時可以改成 10000 比較快看到)
 last_temp_report = utime.ticks_ms()
 
 # --- 5. 主迴圈 ---
@@ -145,20 +145,27 @@ while True:
                     res.close()
                 except Exception as e:
                     print("警報寫入 Firebase 失敗:", e)
-                    #^^^0710
                     
-            # 打包溫度資料
-            temp_payload = {
-                "zone_id": MY_ZONE_ID,
-                "current_temp": round(temp, 1)
-            }
+#             # 打包溫度資料
+#             temp_payload = {
+#                 "zone_id": MY_ZONE_ID,
+#                 "current_temp": round(temp, 1)
+#             }
+#             
+#             try:
+#                 temp_topic = f"smart_timer/zones/{MY_ZONE_ID}/temperature"
+#                 client.publish(temp_topic, ujson.dumps(temp_payload))
+#             except Exception as e:
+#                 pass
+              firebase_zone_url = f"https://smart-timer-app-7da95-default-rtdb.firebaseio.com/users/{MY_UID}/zones/{MY_ZONE_ID}.json"
             
-            try:
-                temp_topic = f"smart_timer/zones/{MY_ZONE_ID}/temperature"
-                client.publish(temp_topic, ujson.dumps(temp_payload))
-            except Exception as e:
-                pass
-                
+              try:
+                  update_payload = {"temperature": round(temp, 1)}
+                  res = urequests.patch(firebase_zone_url, json=update_payload)
+                  print(f"✅ 溫度 {temp:.1f}°C 已同步至 Firebase！")
+                  res.close()
+              except Exception as e:
+                  print("溫度更新 Firebase 失敗:", e)  
         # 重置計時器，等待下一次回報
         last_temp_report = current_time
     
