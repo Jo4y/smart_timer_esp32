@@ -1,7 +1,7 @@
 import urequests, ujson
 import xtools, utime
 from machine import Pin
-import config
+#import config
 from umqtt.simple import MQTTClient
 import ntptime # 內建的網路對時模組
 import ds_sensor, time
@@ -88,7 +88,7 @@ def update_status(dev_id, is_active):
     except Exception as e:
         print("狀態發送失敗:", e)
         
-TEMP_REPORT_INTERVAL = 20000 # 60000 毫秒 = 60 秒回報一次 (測試時可以改成 10000 比較快看到)
+TEMP_REPORT_INTERVAL = 20000 # 60000 毫秒 = 60 秒回報一次
 last_temp_report = utime.ticks_ms()
 
 # --- 5. 主迴圈 ---
@@ -99,7 +99,7 @@ while True:
     
     # 計算當地時間
     # now 的格式: (年, 月, 日, 時, 分, 秒, 星期幾, 一年的第幾天)
-    # 注意: 星期幾是 0-6 (0=星期一, 6=星期日)
+    # 星期幾是 0-6 (0=星期一, 6=星期日)
     now = utime.localtime(utime.time() + UTC_OFFSET)
     now_mins = now[3] * 60 + now[4]
     
@@ -110,8 +110,8 @@ while True:
         if temp is not None:
             print(f"🌡️現在溫度是 {temp:.1f} °C，準備上傳！")
             
-            # 0710新增：過熱緊急斷電防線
-            SAFE_TEMP_LIMIT = 65.0  # 假設安全上限為 65 度 (可調整)
+            # 過熱緊急斷電防線
+            SAFE_TEMP_LIMIT = 30.0  # 假設安全上限為 30 度
             
             if temp >= SAFE_TEMP_LIMIT:
                 print(f"🚨🚨🚨 警告！溫度飆達 {temp:.1f}°C，啟動緊急斷電！ 🚨🚨🚨")
@@ -119,7 +119,7 @@ while True:
                 # 1. 強制關閉所有歸這塊板子管的繼電器
                 for dev_id, dev_data in my_devices.items():
                     if dev_data["state"]: # 如果插座現在是開著的
-                        update_status(dev_id, False) # 呼叫你原本寫好的函式，斷電並回報狀態
+                        update_status(dev_id, False) # 呼叫原本寫好的函式，斷電並回報狀態
                         # 同時清空該設備的排程，防止它下一秒又因為排程時間到了被自動打開
                         my_devices[dev_id]["schedule"] = None 
                 firebase_url = f"https://smart-timer-app-7da95-default-rtdb.firebaseio.com/users/{MY_UID}/notifications.json"
@@ -128,14 +128,14 @@ while True:
                 y, m, d, h, minute, s, _, _ = utime.localtime(utime.time() + UTC_OFFSET)
                 time_str = f"{y}-{m:02d}-{d:02d}T{h:02d}:{minute:02d}:{s:02d}"
                 
-                # 2. 發送專屬的「警報訊息」給 App (走 MQTT 廣播)
+                # 2. 發送專屬的「警報訊息」給 App (MQTT 廣播)
                 alert_payload = {
                     "title": "危險！溫度過高",
                     "content": "系統已強制切斷電源以保護設備安全。",
                     "type": "danger",
                     "status": "unread",
                     "temperature": round(temp, 1),
-                    "zone_name": "我的智慧空間", # 你可以自訂這個名稱
+                    "zone_name": "我的智慧空間",
                     "timestamp": time_str
                 }
                 
@@ -146,17 +146,6 @@ while True:
                 except Exception as e:
                     print("警報寫入 Firebase 失敗:", e)
                     
-#             # 打包溫度資料
-#             temp_payload = {
-#                 "zone_id": MY_ZONE_ID,
-#                 "current_temp": round(temp, 1)
-#             }
-#             
-#             try:
-#                 temp_topic = f"smart_timer/zones/{MY_ZONE_ID}/temperature"
-#                 client.publish(temp_topic, ujson.dumps(temp_payload))
-#             except Exception as e:
-#                 pass
               firebase_zone_url = f"https://smart-timer-app-7da95-default-rtdb.firebaseio.com/users/{MY_UID}/zones/{MY_ZONE_ID}.json"
             
               try:
