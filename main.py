@@ -5,6 +5,16 @@ from machine import Pin
 from umqtt.simple import MQTTClient
 import ntptime # 內建的網路對時模組
 import ds_sensor, time
+import pzem_test
+# import pzem004t
+
+#測試版
+power_meter = pzem_test.PZEM(uart_id=1, tx_pin=9, rx_pin=8)
+print("電量計初始化完成！")
+
+# 引用版
+# pzem_uart = UART(1, baudrate=9600, tx=Pin(10), rx=Pin(9))
+# power_meter = pzem004t.PZEM(pzem_uart)
 
 if ds_sensor.init_sensor(2):
     print("溫度感測器OK！")
@@ -146,15 +156,59 @@ while True:
                 except Exception as e:
                     print("警報寫入 Firebase 失敗:", e)
                     
-              firebase_zone_url = f"https://smart-timer-app-7da95-default-rtdb.firebaseio.com/users/{MY_UID}/zones/{MY_ZONE_ID}.json"
+             # --- 讀取輕量版 PZEM 數據 ---
+            power_data = power_meter.read_data()
+            power_state_str = "safe" # 預設安全
             
-              try:
-                  update_payload = {"temperature": round(temp, 1)}
-                  res = urequests.patch(firebase_zone_url, json=update_payload)
-                  print(f"✅ 溫度 {temp:.1f}°C 已同步至 Firebase！")
-                  res.close()
-              except Exception as e:
-                  print("溫度更新 Firebase 失敗:", e)  
+            update_payload = {
+                "temperature": round(temp, 1),
+                "power": power_state_str
+            }
+            
+            if power_data:
+                print(f"⚡ 電壓: {power_data['voltage']}V, 功率: {power_data['power']}W")
+                if power_data['power'] > 500.0:  # 假設超過 500W 算耗電 (可調整)
+                    power_state_str = "waste"
+                    update_payload["power"] = power_state_str # 更新狀態
+                
+                # 👇 新增：把詳細的電量數據打包成一個物件，放進 energy 欄位
+                update_payload["energy"] = {
+                    "voltage": power_data['voltage'],   # 電壓 (V)
+                    "current": power_data['current'],   # 電流 (A)
+                    "watt": power_data['power'],        # 實時功率 (W)
+                    "total_wh": power_data['energy']    # 累積消耗電量 (Wh)
+                }
+            else:
+                # 👇 補上這行，才不會無聲無息地失敗
+                print("⚠️ PZEM 讀取失敗：腳位錯誤或 110V 未通電！")
+                
+#             # --- 讀取專業版 PZEM 數據 ---
+#             power_state_str = "safe" 
+#             
+#             try:
+#                 # 專業版通常是用特定的 get() 函式來獲取數值
+#                 volts = power_meter.get_voltage()
+#                 watts = power_meter.get_active_power()
+#                 
+#                 print(f"⚡ 電壓: {volts}V, 功率: {watts}W")
+#                 if watts > 500.0:
+#                     power_state_str = "waste"
+#             except Exception as e:
+#                 print("PZEM 專業版讀取失敗:", e)
+                      
+            firebase_zone_url = f"https://smart-timer-app-7da95-default-rtdb.firebaseio.com/users/{MY_UID}/zones/{MY_ZONE_ID}.json"
+            
+            try:
+                res = urequests.patch(firebase_zone_url, json=update_payload)
+                print(f"🔥 Firebase 回傳狀態碼: {res.status_code}")
+                print(f"🔥 Firebase 回傳內容: {res.text}")
+                if res.status_code == 200:
+                    print(f"✅ 溫度 {temp:.1f}°C 與電表數據已真正同步！")
+                else:
+                    print("⚠️ 警告：Firebase 拒絕了你的資料更新！")
+                res.close()
+            except Exception as e:
+                print("溫度與耗電更新失敗:", e)  
         # 重置計時器，等待下一次回報
         last_temp_report = current_time
     
