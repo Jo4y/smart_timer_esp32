@@ -24,8 +24,8 @@ MY_UID = "4x5rweovlhaGIdxf4NEG3bqnfjf1"
 MY_ZONE_ID = "-OnUj2PeTETiwglVVhB1"
 
 my_devices = {
-    "2":        {"pin": Pin(3, Pin.OUT),  "state": False, "schedule": None},
-    "0312_test1": {"pin": Pin(4, Pin.OUT),  "state": False, "schedule": None},
+    "2":        {"pin": Pin(3, Pin.OUT),  "state": False, "schedule": None, "sched_active": False},
+    "0312_test1": {"pin": Pin(4, Pin.OUT),  "state": False, "schedule": None, "sched_active": False},
 }
 
 # 預設把所有設備都關閉
@@ -53,33 +53,47 @@ client = MQTTClient(
     ssl = False,
 )
 
+#排程控制補上手動控制開關
 def sub_cb(topic, msg):
     try:
         topic_str = topic.decode('utf-8') # 先把頻道名稱解碼成字串
-        payload = ujson.loads(msg.decode('utf-8'))
-        dev_id = payload.get("device_id")
+        msg_str = msg.decode('utf-8')
+        print(f"\n📥 [收到 MQTT] 頻道: {topic_str} -> 訊息: {msg_str}")
         
-        # 檢查這個設備 ID 是不是歸這塊 ESP32 管的
-        if dev_id in my_devices:
-            print(f"\n📥 [收到頻道] {topic_str}")
-            print(f"✨ 收到專屬設備 [{dev_id}] 的排程指令！")
-            
-            if payload.get("action") == "cancel":
-                my_devices[dev_id]["schedule"] = None
-                print(f">>> [{dev_id}] 排程已清空")
-            else:
-                my_devices[dev_id]["schedule"] = payload
-                print(f">>> [{dev_id}] 排程已更新")
-                
+        #排程
+        if "schedule" in topic_str:
+            payload = ujson.loads(msg_str)
+            dev_id = payload.get("device_id")
+            if dev_id in my_devices:
+                if payload.get("action") == "cancel":
+                    my_devices[dev_id]["schedule"] = None
+                    print(f">>> [{dev_id}] 排程已清空")
+                else:
+                    my_devices[dev_id]["schedule"] = payload
+                    print(f">>> [{dev_id}] 排程已更新")
+        #手動
+        elif "commands" in topic_str:
+            if ":" in msg_str:
+                dev_id, action = msg_str.split(":")
+                if dev_id in my_devices:
+                    if action == "ON":
+                        update_status(dev_id, True)
+                        print(f"👉 [手動控制] 設備 {dev_id} 已強制開啟！")
+                    elif action == "OFF":
+                        update_status(dev_id, False)
+                        print(f"👉 [手動控制] 設備 {dev_id} 已強制關閉！")
+        
     except Exception as e:
-        print("JSON 解析失敗:", e)
+        print("MQTT 訊息處理失敗:", e)
 
 client.set_callback(sub_cb)
 client.connect()
 
 topic_sub = f"users/{MY_UID}/zones/{MY_ZONE_ID}/devices/+/schedule"
 client.subscribe(topic_sub.encode('utf-8'))
-print(f"👂 開始監聽區域專屬頻道: {topic_sub}")
+topic_cmd = f"users/{MY_UID}/zones/{MY_ZONE_ID}/commands"
+client.subscribe(topic_cmd.encode('utf-8'))
+print(f"👂 開始監聽排程與手動控制頻道...")
 
 # --- 4. 輔助函式：發送狀態 ---
 def update_status(dev_id, is_active):
@@ -179,7 +193,6 @@ while True:
                     "total_wh": power_data['energy']    # 累積消耗電量 (Wh)
                 }
             else:
-                # 👇 補上這行，才不會無聲無息地失敗
                 print("⚠️ PZEM 讀取失敗：腳位錯誤或 110V 未通電！")
                 
 #             # --- 讀取專業版 PZEM 數據 ---
@@ -251,10 +264,11 @@ while True:
                 # 3. 綜合判斷：現在到底該不該通電？
                 should_be_active = (is_time_match and is_day_match)
                 
-                # 4. 狀態改變才做事 (避免每秒瘋狂發送 MQTT)
-                if should_be_active and not dev_data["state"]:
-                    update_status(dev_id, True)
-                elif not should_be_active and dev_data["state"]:
-                    update_status(dev_id, False)
+                # 4. 邊緣觸發
+                last_sched_state = dev_data.get("sched_active", False)
+                if should_be_active != last_sched_state:
+                    update_status(dev_id, should_be_active)
+                    dev_data["sched_active"] = should_be_active # 更新並記憶排程狀態
+                    print(f"⏰ [排程觸發] 設備 {dev_id} 自動切換為 {'開啟' if should_be_active else '關閉'}")
 
     utime.sleep(1)
