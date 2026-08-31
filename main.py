@@ -24,8 +24,8 @@ MY_UID = "4x5rweovlhaGIdxf4NEG3bqnfjf1"
 MY_ZONE_ID = "-OnUj2PeTETiwglVVhB1"
 
 my_devices = {
-    "2":        {"pin": Pin(3, Pin.OUT),  "state": False, "schedule": None, "sched_active": False},
-    "0312_test1": {"pin": Pin(4, Pin.OUT),  "state": False, "schedule": None, "sched_active": False},
+    "socket_right":        {"pin": Pin(3, Pin.OUT),  "state": False, "schedule": None, "sched_active": False},
+    "socket_left": {"pin": Pin(4, Pin.OUT),  "state": False, "schedule": None, "sched_active": False},
 }
 
 # 預設把所有設備都關閉

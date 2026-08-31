@@ -30,7 +30,7 @@ def start_ap_and_listen():
     
     ap = network.WLAN(network.AP_IF)
     ap.active(True)
-    ap.config(essid="Smart_Timer_Setup", authmode=0) # 開放網路
+    ap.config(essid="Smart_Timer_Setup", channel= 1, authmode=network.AUTH_OPEN) # 開放網路
     
     ip = ap.ifconfig()[0]
     print(f"📡 AP 模式啟動！請將手機連上 Wi-Fi: Smart_Timer_Setup")
